@@ -11,6 +11,8 @@ import argparse
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import urllib.parse
 import urllib.request
@@ -38,6 +40,18 @@ def download(src: str, dest_dir: Path) -> Path:
     print(f"Downloading {src} -> {out}", file=sys.stderr)
     urllib.request.urlretrieve(src, out)
     return out
+
+
+def to_wav(audio: Path) -> Path:
+    """Decode with ffmpeg to 16 kHz mono WAV. PyAV silently returns 0 s of audio
+    for some phone-recorded m4a files that ffmpeg decodes fine."""
+    if not shutil.which("ffmpeg") or audio.suffix.lower() == ".wav":
+        return audio
+    wav = audio.with_suffix(".16k.wav")
+    if not wav.exists():
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(audio), "-ac", "1", "-ar", "16000", str(wav)],
+                       check=False)
+    return wav if wav.exists() and wav.stat().st_size > 44 else audio
 
 
 def ts(sec: float) -> str:
@@ -72,11 +86,13 @@ def main():
     print(f"Loading model {a.model} ...", file=sys.stderr)
     model = WhisperModel(a.model, device="auto", compute_type="int8")
     segments, info = model.transcribe(
-        str(audio), language=a.language, initial_prompt=a.prompt,
+        str(to_wav(audio)), language=a.language, initial_prompt=a.prompt,
         vad_filter=True, beam_size=5,
     )
     print(f"Detected language: {info.language} ({info.language_probability:.2f}), "
           f"duration {info.duration:.0f}s", file=sys.stderr)
+    if info.duration == 0:
+        sys.exit(f"Could not decode any audio from {audio}")
 
     convert = None
     if info.language == "zh" and not a.keep_simplified:
