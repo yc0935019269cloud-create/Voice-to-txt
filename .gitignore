@@ -2,3 +2,4 @@ downloads/
 output/
 models/
 __pycache__/
+*.log
